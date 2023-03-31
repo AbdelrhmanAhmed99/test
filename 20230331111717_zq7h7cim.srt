@@ -1,0 +1,308 @@
+﻿1
+00:00:00,700 --> 00:00:07,959
+Speaker 1: Peter, you've had over 500 PRs merged into Bitcoin Core and I think over 11,000 review comments in the repo.
+
+2
+00:00:08,747 --> 00:00:09,979
+Speaker 0: That is possible.
+
+3
+00:00:10,781 --> 00:00:19,118
+Speaker 1: That's quite a lot over 11 years. No, not quite. Sorry, we'll cut that bit so no one knows. Let's say 9 years?
+
+4
+00:00:21,004 --> 00:00:22,530
+Speaker 0: I do not like the implication.
+
+5
+00:00:33,614 --> 00:01:17,755
+Speaker 2: Ha! Cotton here. We support Bitcoin and we contribute to Bitcoin Core and other open-source projects. But another important part of what we do is our educational work. We've run several residencies in the past to help onboard new contributors to Bitcoin protocol development. And if you have an interest in learning more about what we've done, you can find videos and curricula at Chaincode.com.
+
+6
+00:01:19,000 --> 00:01:29,000
+Speaker 1: This podcast is an extension of that work. We're lucky enough to have some of the smartest and most influential Bitcoin developers visit our office. And we want to share some of their stories more widely.
+
+7
+00:01:29,000 --> 00:01:39,358
+Speaker 2: Something a little bit different about this podcast is it's going to be deliberately technical. We are going to be talking to some of the best minds in Bitcoin and hear from them about their insights and reflections on the Bitcoin development process.
+
+8
+00:01:40,281 --> 00:01:53,956
+Speaker 1: And what better way to start than by talking to Peter Weller. Peter has been contributing to Bitcoin for 9 years and is responsible for some of the most important developments in that time, including SegWit, Best Study 2, LibSecP, Schnorr Taproot and many others.
+
+9
+00:01:55,000 --> 00:02:09,836
+Speaker 2: So we talked to Peter a little bit about some of those influential PRs, including headers for Syncing and Ultra Prune. And we hear about the motivation for those changes and how he thinks about them now. This is going to be a two parter. And in the next episode, we're going to talk about LibSecP and Peter's thoughts about Bitcoin in 2020.
+
+10
+00:02:11,341 --> 00:02:17,333
+Speaker 1: We really enjoyed chatting to Peter and we hope you enjoyed listening. Now here's the conversation. We'll catch up again at the end of the show.
+
+11
+00:02:18,383 --> 00:02:19,818
+Speaker 2: Welcome to the podcast.
+
+12
+00:02:20,163 --> 00:02:20,591
+Speaker 1: Hi, Peter.
+
+13
+00:02:21,020 --> 00:02:22,693
+Speaker 0: Hi, Peter. Hello, Chelm and Jonas.
+
+14
+00:02:23,523 --> 00:02:26,000
+Speaker 1: Thank you for being the first guest on our podcast.
+
+15
+00:02:26,644 --> 00:02:28,557
+Speaker 2: So far the most important guest we've had.
+
+16
+00:02:29,442 --> 00:02:32,000
+Speaker 0: That's an amazing honor. Thank you so much for having me.
+
+17
+00:02:32,949 --> 00:03:03,771
+Speaker 1: Well, we're here to talk about Bitcoin. We are. And Bitcoin Core development. And we have Peter Weller as our guest, who is a Bitcoin Core contributor of many years standing. Peter, you've had over 500 PRs merged into Bitcoin Core and I think over 11,000 review comments in the repo. So that is possible. That's quite a lot over 11 years. No, not quite. Sorry. We all cut that bit. Let's say nine years.
+
+18
+00:03:05,662 --> 00:03:07,247
+Speaker 0: I do not like the implication.
+
+19
+00:03:11,661 --> 00:03:30,536
+Speaker 1: We have a few questions for you. And the first question is of all of those PRs that you've done, we've picked out a few that we think are interesting. And we'd like to hear from you, kind of your inspiration for those and interesting thoughts about those. And the first one we picked was headers first syncing. So can you first of all tell us what that is?
+
+20
+00:03:31,428 --> 00:05:37,469
+Speaker 0: Sure. So historically how in the Bitcoin protocol and Bitcoin Core implementation blocks were learned about and fetched from peers was using the get blocks message. Which you would send to a peer telling them, hey, I know about this block hash. Tell me what's more. And they would send you a block, a list of block hashes back and you'd start fetching them. And at the end, when you've done all of them, you'd ask again, now what more blocks should I ask about? And this works fine as long as you're fetching blocks from one peer. The problem is this mechanism really does not parallelize well to multiple connections. Because there's no way to interleave. or I guess you could come up with some complicated mechanism where you're like, oh, I know this peer has these blocks and this peer has these blocks. I'm going to ask one from each. But it's really a mess because you don't know where you're going. You start at the beginning and you just ask, hey, what's next? And there's huge attack potential there because a peer could just be like, yeah, trust me, I have a very good chain for you. In the end, it's going to have high difficulty, but it just keeps giving you low difficulty blocks for starters. So this was also a problem in practice. Around time, maybe 0.6, 0.7, this started to become an issue because downloading blocks started taking longer than 10 minutes. That may have been a problem before that time even. The problem was you...
+
+21
+00:05:40,101 --> 00:05:42,000
+Speaker 1: You mean downloading the entire blockchain took 10 minutes?
+
+22
+00:05:42,530 --> 00:06:16,979
+Speaker 0: Yes. You'd start off downloading blocks from one peer. You'd ask one peer. Intentionally, you would only ask one because we knew that this mechanism didn't parallelize. And then another peer would announce to you, hey, I have a new block. And you'd ask them, hey, give me that block. And you'd be like, well, I have no idea what its parent is. Can you tell me something about its parents? And the result was that you'd basically start off a completely parallel second block downloading process with that other peer.
+
+23
+00:06:17,464 --> 00:06:19,000
+Speaker 1: And that new block is called an orphan block.
+
+24
+00:06:19,877 --> 00:08:18,839
+Speaker 0: Right. That would be... That's even another issue that the pre-headers first mechanism had. You'd learn about blocks and have no way of knowing what its parents were until you had actually fully synced those parents. So there used to be a pool where these downloaded blocks without parents were kept called orphan blocks. Which is unrelated to... Stale blocks. Stale blocks. Which are just blocks in the chain that were abandoned because the majority hashrate forked away. So around the time of 07, 0.8, 0.9, I think we kept adding hacks on top of the block downloading mechanism. Trying to put heuristics to prevent it from, you know, having eight connections and basically downloading all blocks from all of them simultaneously. At some point, syncing got so slow that you'd end up with so many orphans that you could go out of memory while downloading. You're still trying to catch up and you're learning of all these new blocks that were just mined during the time you were syncing. And they would all be kept in memory. And so then we introduced a limit on how many of those were kept and the oldest ones would be deleted. And that led to even more problems where those orphans were actually downloaded over and over again. So overall this was a mess and it was clear this wasn't gonna keep working.
+
+25
+00:08:21,987 --> 00:08:26,858
+Speaker 1: And for context this is 2013, 2014-ish? Possibly.
+
+26
+00:08:28,686 --> 00:09:22,398
+Speaker 0: This was fixed in 0.10 so you can... HEDR's first synchronization was introduced in 0.10. And what it did was split the synchronization process in two steps, so to speak, but they were performed in parallel. One is where the normal synchronization process that's just from beginning to end, give me whatever, was replaced with just synchronizing the headers. So you'd build the best header chain by asking peers, give me headers. Oh, you have more headers, give me more headers. And the same mechanism as previously was used for blocks would now just be used for headers, which takes in the order of minutes. Because it's at the time a couple dozen megabytes, maybe a bit more now.
+
+27
+00:09:23,440 --> 00:09:32,979
+Speaker 1: And the reason for that is the vast majority of time when doing an initial block download and initial sync is checking the signatures in the transactions.
+
+28
+00:09:33,581 --> 00:09:40,238
+Speaker 0: Right. Plus also actually downloading the data because headers are 80 bytes per block rather than...
+
+29
+00:09:41,464 --> 00:09:43,000
+Speaker 1: One megabyte at a time, two megabytes now.
+
+30
+00:09:43,583 --> 00:11:28,000
+Speaker 0: Well, at the time they weren't quite full yet. And then there would be a second phase, which would just be a background process where during the main loop of Bitcoin Core's network processing, it would try to figure out which headers have I heard about from which peers and see, oh, this one has a chain that is actually better than my current fully validated block tip. And it would ask for a couple blocks there. And by limiting how many blocks were asked of each peer, this parallelizes quite well. Because I think there's a limit of maybe eight or 16 blocks per peer that are ever queued up. Okay. So you'd ask, oh, you have this header chain. I'll ask the next 16 blocks of you. Oh, someone else has them too. I'll ask for the 16 ones after that one from someone else. Together with a heuristic at a time that was very simple, but I think has worked fairly well, which is we'd never download a block that is more than 1024 blocks ahead of our current tip. So because we're starting to download blocks in parallel now from multiple peers and just validating as they come in. And we don't have the problem of orphan blocks anymore because we already have their headers by the time we ask for them. So we know they're actually part of the best chain, assuming that chain is valid. But there's still some denial of service concerns there, but they're much less severe in the headers first model.
+
+31
+00:11:28,320 --> 00:11:35,306
+Speaker 1: And one of the reasons that those DOS concerns are less is that the headers are very cheap to verify, but expensive to create. Exactly.
+
+32
+00:11:36,221 --> 00:14:34,000
+Speaker 0: That's a general principle. You try to validate things with the highest cost for an attacker divided by cost of validation. You do those tests first. And if you can bail out early, this can massively reduce attack potential. So in order to attack now, you still have to first create an actual best header chain. Or of course, Sybil attack the node during its synchronization. And there's some techniques to avoid that as well. Ignoring those, we already have a headers chain, so we can just ask for blocks from everyone in parallel, see when they come in. And as soon as we have all blocks up to a certain point, we can actually run the full script and transaction validation and continue. So this heuristic we have is one for... The question is, of course, how do you pick good peers? During IBD, you don't care so much about partition resistance or anything. You're still catching up with the network and you're not fully functional until you've caught up. So your primary concern is, well, how do I pick fast peers to synchronize from? And the mechanism we picked is just never download a block that's more than 1024 blocks ahead of your current tip. And if you're... So you have kind of a window of blocks that starts at your current tip and 1024 blocks ahead. And in that window, you try to fetch blocks as possible from all your peers. If that window can't move because of one peer, which means you have either... You have downloaded all the blocks in that window, except blocks that are still outstanding requests with one peer, you would disconnect that peer. So conceptually, this means if you have one peer that's so much slower that it is preventing you from making progress that the other peers are allowing you to make. So it's a factor 10 slower than the rest or something. You would kick that peer and find another one. And this mechanism works reasonably well and it will find decent peers. It can get stuck with moderate peers. If they're all equally slow, this doesn't do anything.
+
+33
+00:14:34,383 --> 00:14:35,737
+Speaker 1: Right. And there's nothing to do.
+
+34
+00:14:36,400 --> 00:14:55,959
+Speaker 0: Well, you could still find faster... You don't know that. there might be because your own connection is limited or it may be just because you've all picked rather bad but non-terrible peers. In any case, that mechanism is still being used today, I believe.
+
+35
+00:14:56,761 --> 00:15:07,000
+Speaker 1: And so for that PR, was that the first time we were tracking per-peer state or per-peer performance in order to do that kind of calculation?
+
+36
+00:15:07,881 --> 00:15:53,679
+Speaker 0: I think so. There was per-peer state before that in particular to prevent the same transaction from being downloaded from multiple peers. So there was already an ask for caching where you'd at most ask for the same transaction once every two minutes or something. So that already existed. That was there since forever. But as an actual performance optimization, I think this was the first and maybe still the only real heuristic for finding good peers as opposed to heuristics for safe, secure peers.
+
+37
+00:15:54,505 --> 00:15:54,686
+Speaker 1: Right.
+
+38
+00:15:56,080 --> 00:16:50,679
+Speaker 0: So there's a bunch of those nowadays where we're trying to create outgoing connections. I think when a new incoming connection comes but all our incoming slots are already full, there are some heuristics that are used to determine is this peer better than any of the one... Should we maybe consider kicking one of our inbound peers in favor of this new one? And their rules are like, don't kick the last peer that has given you a block or prefer peers that are from a variety of network sources or so on. But I think this 1024 window move prevention kicking heuristic is the only actual performance optimizing thing.
+
+39
+00:16:51,580 --> 00:17:04,899
+Speaker 1: And then I think in 0.17 there were a few checks added for peers that were obviously on a different chain or trying to follow different census rules from you.
+
+40
+00:17:05,740 --> 00:17:29,000
+Speaker 0: Yeah, there were a bunch of other rules added where we were concerned about islands of nodes connected to each other that would share the same consensus rules, but they would all be surrounded by nodes with different consensus rules and they did not actually figure out that there were no blocks coming in.
+
+41
+00:17:29,762 --> 00:17:35,899
+Speaker 1: Right, and that was around the time of the SegWit2x and the PCash hard forks which is where that concern came from.
+
+42
+00:17:37,182 --> 00:17:53,839
+Speaker 2: For such a major change though, this was actually pretty quick. You opened the PR in July 2014 and it was merged in October 2014. So compared to today's review process, that's a pretty quick turnaround for some major changes.
+
+43
+00:17:54,500 --> 00:18:06,138
+Speaker 0: I think I started working on it significantly earlier than opening the PR though. I'm not sure. I remember it back then as a slow thing.
+
+44
+00:18:08,046 --> 00:18:08,630
+Speaker 2: It's all relative.
+
+45
+00:18:11,603 --> 00:18:19,579
+Speaker 1: And on that, how has Bitcoin Core development culture changed over those eight or nine years that you've been contributing?
+
+46
+00:18:20,200 --> 00:19:18,719
+Speaker 0: It's certainly become harder. We started off with Bitcoin Core had no tests at the time when I first started contributing. Testing meant manual testing like, hey, I tried to synchronize and it still works. There were no unit tests, no functional tests. There was, I don't know when the unit test framework was introduced. This was fairly early but it is limited in how much you can do with just these unit tests. The big interactions between nodes. The first attempt there was, or first major piece of infrastructure that tested larger scale behavior was Matt Corello's...
+
+47
+00:19:19,865 --> 00:19:20,570
+Speaker 1: Pull tester?
+
+48
+00:19:22,200 --> 00:19:56,439
+Speaker 0: Well, pull tester I think was just a bot that would test pull requests. But one of the things it did was have a test implemented in Bitcoin J that simulated things like reorgs and so on. And see that Bitcoin Core would follow the right path under all sorts of scenarios. And it was much later that that eventually got rewritten in Python.
+
+49
+00:19:57,261 --> 00:20:00,798
+Speaker 1: And that test still exists I think as featureblock.py?
+
+50
+00:20:01,541 --> 00:20:09,959
+Speaker 0: Correct. That is now one of the many functional tests that there have been dozens added over.
+
+51
+00:20:10,060 --> 00:20:11,771
+Speaker 1: I think about 130, 140 right now.
+
+52
+00:20:13,883 --> 00:20:23,747
+Speaker 0: Yeah, that's... How do you call that? A dozen dozen? A score. A score. A score is 20 I think. Oh, Abraham Lincoln.
+
+53
+00:20:25,122 --> 00:20:44,618
+Speaker 1: A gross. A gross. I apologize. We'll cut that bit. I have one final question on headers. first sync which is... So did you see an immediate uptick in performance and what would... If you hadn't done that or if that hadn't been done, what would Bitcoin look like right now?
+
+54
+00:20:45,180 --> 00:21:23,899
+Speaker 0: So not too long ago I think BitMax published a report of trying to synchronize various historical versions. And I was surprised to actually not see headers first make a big difference there. As far as I remember there was no big difference between 0.9 and 0.10. At the time I believe it was an enormous difference. Like, wow, it would only download every block once. So I don't know why they didn't observe that.
+
+55
+00:21:25,064 --> 00:21:28,959
+Speaker 1: It's possible. the methodology was that everything was in their local network or they had...
+
+56
+00:21:29,122 --> 00:21:45,538
+Speaker 0: Possibly. I think they actually synchronized from random peers on the network. But I'm not sure. I remember it as a very big difference. In particular for IBD. For outside of IBD it wasn't...
+
+57
+00:21:49,442 --> 00:21:51,557
+Speaker 1: If you're at the tip it doesn't make a huge difference.
+
+58
+00:21:52,204 --> 00:21:52,469
+Speaker 0: Right.
+
+59
+00:21:53,906 --> 00:21:55,255
+Speaker 2: Ultra prune. Yes?
+
+60
+00:21:56,525 --> 00:22:00,867
+Speaker 0: I can talk about what ultra prune is. Yeah. Go ahead. So this was in 0.8.
+
+61
+00:22:04,265 --> 00:22:04,469
+Speaker 2: Okay.
+
+62
+00:22:06,060 --> 00:22:38,265
+Speaker 0: And ultra prune is the name of the patch set I made. that effectively introduced the concept of an explicit UTXO set to Bitcoin's validation logic. Before that time there was a database that kept for every transaction output ever created. Whether or not it was already spent and even where it was spent in Tree using 12 bytes of data in the database per output ever created. Right.
+
+63
+00:22:39,723 --> 00:22:42,979
+Speaker 1: That is a TXO set, not a UTXO set.
+
+64
+00:22:43,444 --> 00:25:47,000
+Speaker 0: Right. And it was mutable. And entries would... It was a database from TXID to list of its outputs and whether or not they were spent and where they were spent. And by the time I started working on this, this database had grown to several gigabytes. And this was a problem. It was fairly slow but also the database was indirect in that when you wanted to do validation you had to go first check this database to see if those outputs were not already spent. And if they weren't you still had to go find the transaction in the block files to find those UTXOs because you wouldn't be able to validate the script before you could fetch the UTXOs. So there was effectively your working set was this whole database plus the whole blockchain. This couldn't work with pruning or anything. You actually had to have all blocks available because you were using the blockchain data as the UTXO data. And the motivation was someone had started working I think on a patch that would go through this database and just delete all TXIDs whose outputs were already fully spent. Because clearly these weren't needed anymore. And Ultra Prune started as a proof of concept of well if we take this to the extreme how small can we make that database? So instead of storing something for every output why don't we actually switch to something where you just store the unspent ones because those are the only ones you still need afterwards. And then there was this performance consideration where like well everything is indirect we need always this indirection to the blockchain data. But the UTXOs are actually small. they're just an amount and a small script usually. Why don't we copy that to the database as well? so everything you need for validation is right there. And it depends on what kind of IO speed you had. but just this at the time reduced the amount of data you had to access from several gigabytes to maybe in the tens of megabytes at the time.
+
+65
+00:25:49,282 --> 00:25:57,606
+Speaker 1: And if you extrapolate that to today it changes from 300 gigabytes or whatever the blockchain is to 3 gigabytes or something like that. Yeah exactly.
+
+66
+00:26:03,280 --> 00:28:15,939
+Speaker 0: So yeah and this not only was a performance improvement it's fairly fundamental as a scaling thing because your UTXOs that hopefully does not grow as fast as your blockchain. There have been times in the past where it's shrunk not as much as I would like but UTXOs. that is much more correlated with actual usage while the blockchain is clearly append only and cumulative and ever growing based on activity. So there's of course UltraBrun was combined with a switch from BDB to LevelDB. Those were developed independently and then actually turned in I think into into one PR before being merged. And this had the well-known effect of having caused a fork in the chain in March 2013 I believe. So the problem here was 0.8 was so much faster that miners switched over to it almost immediately. But much of the network had not switched from 0.8 from 0.7 to 0.8. And the BDB database that was used for the TX index with all this spent as information in 0.7 had an issue and had always had an issue that BDB requires you to configure how many lock objects you need. And the number of lock objects is correlated with the number of pages in the database that are simultaneously affected by a single atomic transaction.
+
+67
+00:28:16,828 --> 00:28:18,000
+Speaker 1: Where a transaction here is a database update.
+
+68
+00:28:18,860 --> 00:29:37,438
+Speaker 0: Correct. It has nothing to do with Bitcoin transactions. This is a database transaction and the whole update of applying a block to the database was done as one atomic update so that either the block would validate and you would be able to continue or there would be a failure and the whole thing would never be applied. So the problem was this number was... Let me rant a bit about the BDB documentation which tells you in guiding how to pick this number is run your database with a reasonable load and use this function to determine how many locks are used. There was no way you can predict ahead of time how many locks your actual absolute maximum is. This was combined with a bug in our code on the Bitcoin Core side that a failure to grab a lock would be treated as that block being invalid. Things would have been somewhat but not all that different if we wouldn't have had that bug.
+
+69
+00:29:38,661 --> 00:29:51,000
+Speaker 1: So the crucial difference there is that the block failed but instead of attributing that to a local failure in your own system you attribute it to a consensus failure.
+
+70
+00:29:51,401 --> 00:32:43,719
+Speaker 0: Correct. And it would just permanently mark the block as invalid when it somehow needed too many locks. This was non-deterministic across platforms and as we later found out even exploitable because during a reorg the whole reorg would be done as one atomic update which means that the number of locks you need is actually even proportional to the size of your reorg. This means that by feeding different forks to different nodes you could probably have always before 0.8 selectively forked nodes off by triggering this behavior. So what happened was 0.8 which switched to a completely different database model as well as levelDB which is a local database with no locking whatsoever. BDB is a cross process database system. So what happened of course was someone produced a block that for a wide range of nodes on the network exceeded the number of locks that were needed. The network rejected the block but the miner that created it as well as a majority of other miners were all happily continuing because they were on 0.8 that had no concern about these locks. So what had happened was we had unintentionally removed a consensus rule which was already inconsistent but still it shouldn't have been removed without being aware of it and thereby actually introduced a hard fork. It's debatable whether it is a hard fork given that the old code was actually inconsistent with itself all the time. In any case it caused an actual consensus failure on the network. Miners quickly agreed to temporarily revert back to 0.7 which allowed overwriting a chain with one that everybody would accept. 0.8.1 was released. that in 0.8 added something simulating the locks limits that BDB had in the hope that people could use 0.8.1 that had the same restrictions or at least similar restrictions.
+
+71
+00:32:44,481 --> 00:32:48,916
+Speaker 1: Miners could use 0.8.1 so they wouldn't be creating blocks that old nodes would.
+
+72
+00:32:51,682 --> 00:33:17,819
+Speaker 0: This was temporary I believe. two or three months later this rule expired. I believe it took until August 2013 until another block was produced that might have triggered the 0.7 issue but by then the network had largely updated to 0.8 and later versions.
+
+73
+00:33:19,380 --> 00:33:35,257
+Speaker 1: There's really a lot to dig into in all of that. My first reaction would be I'm a little bit hesitant to call that a hard fork which I think you said. I don't think the word hard fork has much meaning in this context really.
+
+74
+00:33:37,342 --> 00:33:44,777
+Speaker 0: Yeah I agree. Let's keep it at unintentional consensus failure.
+
+75
+00:33:54,530 --> 00:33:59,499
+Speaker 2: I enjoyed that quite a bit.
+
+76
+00:34:00,000 --> 00:34:01,212
+Speaker 1: Yeah that was great.
+
+77
+00:34:02,401 --> 00:34:18,181
+Speaker 2: So that was the first half of our conversation with Peter and stay tuned for the second half. Thank you.
+
